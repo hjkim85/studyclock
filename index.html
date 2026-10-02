@@ -1,0 +1,234 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>Study Tracker</title>
+  <style>
+    :root { --bg: #f4f6f8; --primary: #3b82f6; --text: #1f2937; --card: #ffffff; }
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: var(--bg); color: var(--text); margin: 0; padding: 0; padding-bottom: 80px; }
+    .header { padding: 20px; background: var(--card); text-align: center; font-size: 1.2rem; font-weight: bold; border-bottom: 1px solid #e5e7eb; }
+    .container { padding: 20px; max-width: 600px; margin: 0 auto; }
+    .card { background: var(--card); padding: 20px; border-radius: 12px; box-shadow: 0 2px 4px rgba(0,0,0,0.05); margin-bottom: 20px; text-align: center; }
+    
+    /* 타이머 UI */
+    .time-display { font-size: 2.5rem; font-weight: bold; margin: 10px 0; color: var(--primary); }
+    .stats { display: flex; justify-content: space-around; font-size: 0.9rem; color: #6b7280; margin-bottom: 20px; }
+    .btn { background: var(--primary); color: white; border: none; padding: 15px 30px; font-size: 1.1rem; border-radius: 30px; width: 100%; cursor: pointer; font-weight: bold; transition: opacity 0.2s; }
+    .btn.stop { background: #ef4444; }
+    .btn:active { opacity: 0.8; }
+    
+    /* 진도표 UI */
+    .progress-item { background: var(--card); padding: 15px; border-radius: 8px; margin-bottom: 10px; display: flex; justify-content: space-between; align-items: center; box-shadow: 0 1px 3px rgba(0,0,0,0.05); }
+    .check-btn { background: #10b981; color: white; border: none; padding: 8px 15px; border-radius: 6px; cursor: pointer; font-weight: bold; }
+    
+    /* 하단 탭 네비게이션 */
+    .nav { position: fixed; bottom: 0; left: 0; right: 0; background: var(--card); display: flex; border-top: 1px solid #e5e7eb; }
+    .nav-item { flex: 1; padding: 15px; text-align: center; font-weight: bold; color: #9ca3af; cursor: pointer; }
+    .nav-item.active { color: var(--primary); border-bottom: 3px solid var(--primary); }
+    
+    /* 섹션 전환 */
+    #timer-section, #progress-section { display: none; }
+    .active-section { display: block !important; }
+  </style>
+</head>
+<body>
+
+  <div class="header" id="current-project">기본 프로젝트 (로딩중...)</div>
+
+  <div class="container">
+    <!-- 타이머 섹션 -->
+    <div id="timer-section" class="active-section">
+      <div class="card">
+        <div class="stats">
+          <div>오늘 <br><strong id="today-time">00:00</strong></div>
+          <div>누적 <br><strong id="total-time">00:00</strong></div>
+        </div>
+        <div class="time-display" id="stopwatch">00:00:00</div>
+        <button class="btn" id="toggle-btn" onclick="toggleStudy()">공부 시작</button>
+      </div>
+      <div id="recent-logs" style="font-size: 0.9rem; color: #4b5563;">
+        <!-- 최근 기록 표시 영역 -->
+      </div>
+    </div>
+
+    <!-- 진도표 섹션 -->
+    <div id="progress-section">
+      <div style="margin-bottom: 15px; display: flex; gap: 10px;">
+        <input type="text" id="new-progress" placeholder="새로운 진도 입력..." style="flex: 1; padding: 10px; border-radius: 6px; border: 1px solid #ccc;">
+        <button onclick="addProgress()" style="padding: 10px 15px; background: var(--primary); color: white; border: none; border-radius: 6px;">추가</button>
+      </div>
+      <div id="progress-list">
+        <!-- 진도표 항목들이 렌더링됨 -->
+      </div>
+    </div>
+  </div>
+
+  <!-- 하단 탭 -->
+  <div class="nav">
+    <div class="nav-item active" onclick="switchTab('timer')">타이머</div>
+    <div class="nav-item" onclick="switchTab('progress')">진도표</div>
+  </div>
+
+  <script>
+    // URL이 정상적으로 적용되었습니다.
+    const GAS_URL = 'https://script.google.com/macros/s/AKfycbwvboluO7UXDXfsHD1hMEYE7SWx7eizND7wBrbNrN58D74MECkgrbwpeU7B_idfcYPEaw/exec';
+    
+    // 상태 관리 (앱을 껐다 켜도 유지되도록 로컬스토리지 활용)
+    let isStudying = localStorage.getItem('isStudying') === 'true';
+    let startTime = localStorage.getItem('startTime') ? new Date(localStorage.getItem('startTime')) : null;
+    let timerInterval = null;
+
+    // 초기 화면 세팅
+    document.getElementById('current-project').innerText = "메인 프로젝트";
+    updateButtonState();
+    if (isStudying) startStopwatch();
+
+    // 탭 전환 로직
+    function switchTab(tab) {
+      document.getElementById('timer-section').classList.remove('active-section');
+      document.getElementById('progress-section').classList.remove('active-section');
+      document.querySelectorAll('.nav-item').forEach(el => el.classList.remove('active'));
+      
+      document.getElementById(`${tab}-section`).classList.add('active-section');
+      event.target.classList.add('active');
+    }
+
+    // 타이머 토글 (비동기 최적화)
+    function toggleStudy() {
+      const now = new Date();
+      const btn = document.getElementById('toggle-btn');
+      
+      if (!isStudying) {
+        // [시작] UI 즉시 반영
+        isStudying = true;
+        startTime = now;
+        localStorage.setItem('isStudying', 'true');
+        localStorage.setItem('startTime', startTime.toISOString());
+        
+        updateButtonState();
+        startStopwatch();
+
+        // GAS 백그라운드 전송 (이벤트 로그 생성)
+        sendToGAS('Study_Logs', 'appendRow', [
+          "Project_1", 
+          now.toLocaleString(), 
+          "", // 종료시간 비움
+          ""  // 메모 비움
+        ]);
+
+      } else {
+        // [종료] UI 즉시 반영
+        isStudying = false;
+        clearInterval(timerInterval);
+        const duration = Math.floor((now - startTime) / 1000); // 초 단위
+        
+        localStorage.setItem('isStudying', 'false');
+        localStorage.removeItem('startTime');
+        
+        updateButtonState();
+        document.getElementById('stopwatch').innerText = "00:00:00";
+        
+        // 종료 즉시 메모 팝업 띄우기
+        const memo = prompt("방금 한 공부에 대해 메모를 남기시겠습니까?", "");
+        
+        // GAS 백그라운드 전송 (종료시간 및 메모 업데이트를 위해 새 로그 기록)
+        sendToGAS('Study_Logs', 'appendRow', [
+          "Project_1", 
+          startTime.toLocaleString(), 
+          now.toLocaleString(), 
+          memo || "메모 없음",
+          duration + "초"
+        ]);
+      }
+    }
+
+    // 화면 갱신 유틸리티
+    function updateButtonState() {
+      const btn = document.getElementById('toggle-btn');
+      if (isStudying) {
+        btn.innerText = "공부 종료";
+        btn.classList.add('stop');
+      } else {
+        btn.innerText = "공부 시작";
+        btn.classList.remove('stop');
+      }
+    }
+
+    function startStopwatch() {
+      timerInterval = setInterval(() => {
+        const now = new Date();
+        const diff = new Date(now - startTime);
+        const h = String(diff.getUTCHours()).padStart(2, '0');
+        const m = String(diff.getUTCMinutes()).padStart(2, '0');
+        const s = String(diff.getUTCSeconds()).padStart(2, '0');
+        document.getElementById('stopwatch').innerText = `${h}:${m}:${s}`;
+      }, 1000);
+    }
+
+    // 진도표 추가 (비동기)
+    function addProgress() {
+      const input = document.getElementById('new-progress');
+      const title = input.value.trim();
+      if (!title) return;
+      
+      const now = new Date().toLocaleString();
+      
+      // UI 즉시 렌더링
+      const list = document.getElementById('progress-list');
+      const item = document.createElement('div');
+      item.className = 'progress-item';
+      item.innerHTML = `
+        <div>
+          <div style="font-weight:bold;">${title}</div>
+          <div style="font-size:0.8rem; color:#6b7280;">누적: <span class="count">0</span>회</div>
+        </div>
+        <button class="check-btn" onclick="checkProgress(this, '${title}')">✔ 체크</button>
+      `;
+      list.prepend(item);
+      input.value = '';
+
+      // 백그라운드 전송
+      sendToGAS('Progress', 'appendRow', [ "Project_1", title, 0, now ]);
+    }
+
+    // 진도표 체크 (+1 누적, 비동기)
+    function checkProgress(btn, title) {
+      // UI 즉시 반영 (낙관적 업데이트)
+      const countSpan = btn.previousElementSibling.querySelector('.count');
+      let currentCount = parseInt(countSpan.innerText);
+      countSpan.innerText = currentCount + 1;
+
+      // 시각적 피드백
+      btn.innerText = "✔ 완료";
+      btn.style.background = "#9ca3af";
+      setTimeout(() => {
+        btn.innerText = "✔ 체크";
+        btn.style.background = "#10b981";
+      }, 1000);
+
+      // 백그라운드 전송 (누적 로그 기록)
+      sendToGAS('Comments', 'appendRow', [
+        title,
+        "체크 완료 (카운트 1 증가)",
+        new Date().toLocaleString()
+      ]);
+    }
+
+    // 구글 시트 통신 공통 함수 (fetch는 백그라운드에서 돌고 UI를 멈추지 않음)
+    function sendToGAS(sheetName, action, rowData) {
+      fetch(GAS_URL, {
+        method: 'POST',
+        body: JSON.stringify({
+          sheetName: sheetName,
+          action: action,
+          rowData: rowData
+        }),
+        headers: {
+          'Content-Type': 'text/plain;charset=utf-8',
+        }
+      }).catch(err => console.error("Data save failed in background:", err));
+    }
+  </script>
+</body>
+</html>
